@@ -1,71 +1,39 @@
-@import UIKit;
-
-#import <HBLog.h>
-
 @interface SBRingerControl : NSObject
 - (BOOL)isRingerMuted;
 @end
 
 @interface _UIStatusBarDataQuietModeEntry : NSObject
-@property(nonatomic, copy) NSString *focusName;
+    @property(nonatomic, copy) NSString *focusName;
 @end
 
 @interface _UIStatusBarData : NSObject
-@property(nonatomic, copy) _UIStatusBarDataQuietModeEntry *quietModeEntry;
+    @property(nonatomic, copy) _UIStatusBarDataQuietModeEntry *quietModeEntry;
 @end
 
 @interface _UIStatusBarItemUpdate : NSObject
-@property(nonatomic, strong) _UIStatusBarData *data;
+    @property(nonatomic, strong) _UIStatusBarData *data;
 @end
 
 @interface UIStatusBarServer : NSObject
-+ (const unsigned char *)getStatusBarData;
+    + (const unsigned char *)getStatusBarData;
 @end
 
 @interface UIStatusBar_Base : UIView
-@property(nonatomic, strong) UIStatusBarServer *statusBarServer;
-- (void)reloadSingleMute;
-- (void)forceUpdateData:(BOOL)arg1;
-- (void)statusBarServer:(id)arg1 didReceiveStatusBarData:(const unsigned char *)arg2 withActions:(int)arg3;
+    @property(nonatomic, strong) UIStatusBarServer *statusBarServer;
+    - (void)reloadSingleMute;
+    - (void)forceUpdateData:(BOOL)arg1;
+    - (void)statusBarServer:(id)arg1 didReceiveStatusBarData:(const unsigned char *)arg2 withActions:(int)arg3;
 @end
 
 @interface UIStatusBar_Modern : UIStatusBar_Base
 @end
 
-@interface SMWeakContainer : NSObject
-@property(nonatomic, weak) id object;
-@end
-
-@implementation SMWeakContainer
-@end
-
-static BOOL kIsEnabled = YES;
-static BOOL kUseLowPriorityLocation = NO;
-
-static void ReloadPrefs() {
-    static NSUserDefaults *prefs = nil;
-    if (!prefs) {
-        prefs = [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.singlemuteprefs"];
-    }
-
-    NSDictionary *settings = [prefs dictionaryRepresentation];
-
-    kIsEnabled = settings[@"IsEnabled"] ? [settings[@"IsEnabled"] boolValue] : YES;
-    kUseLowPriorityLocation = settings[@"LowerPriorityForLocationIcon"] ? [settings[@"LowerPriorityForLocationIcon"] boolValue] : NO;
-}
-
-static SBRingerControl *_ringerControl = nil;
-static NSMutableSet<SMWeakContainer *> *_weakContainers = nil;
-
-// this is enough for the status bar legacy data
+static BOOL isRingerMuted;
 static unsigned char _sharedData[5000] = {0};
-
-%group SingleMuteQuietMode
 
 %hook _UIStatusBarIndicatorQuietModeItem
 
 - (id)systemImageNameForUpdate:(_UIStatusBarItemUpdate *)update {
-    BOOL isRingerMuted = [_ringerControl isRingerMuted];
     BOOL isQuietModeEnabled = ![update.data.quietModeEntry.focusName isEqualToString:@"!Mute"];
     if (isRingerMuted && !isQuietModeEnabled) {
         return @"bell.slash.fill";
@@ -77,98 +45,42 @@ static unsigned char _sharedData[5000] = {0};
 
 %hook _UIStatusBarDataQuietModeEntry
 
-- (id)initFromData:(unsigned char *)data type:(int)arg2 focusName:(const char *)arg3 maxFocusLength:(int)arg4 imageName:(const char*)arg5 maxImageLength:(int)arg6 boolValue:(BOOL)arg7 {
-    BOOL isQuietMode = data[2];
-    if (!isQuietMode) {
-        _sharedData[2] = [_ringerControl isRingerMuted];
-        return %orig(_sharedData, arg2, "!Mute", arg4, arg5, arg6, arg7);
+    - (id)initFromData:(unsigned char *)data type:(int)arg2 focusName:(const char *)arg3 maxFocusLength:(int)arg4 imageName:(const char*)arg5 maxImageLength:(int)arg6 boolValue:(BOOL)arg7 {
+        BOOL isQuietMode = data[2];
+        if (!isQuietMode) {
+            _sharedData[2] = isRingerMuted;
+            return %orig(_sharedData, arg2, "!Mute", arg4, arg5, arg6, arg7);
+        }
+        return %orig;
     }
-    return %orig;
-}
 
 %end
 
-%hook SBRingerControl
+%hook SpringBoard
 
-// iOS 15
-- (id)initWithHUDController:(id)arg1 soundController:(id)arg2 {
-	_ringerControl = %orig;
-	return _ringerControl;
-}
-
-// iOS 16+
-- (id)initWithBannerManager:(id)arg1 soundController:(id)arg2 {
-	_ringerControl = %orig;
-	return _ringerControl;
-}
-
-- (void)setRingerMuted:(BOOL)arg1 {
-    %orig;
-    for (SMWeakContainer *container in _weakContainers) {
-        UIStatusBar_Base *statusBar = (UIStatusBar_Base *)container.object;
-        [statusBar reloadSingleMute];
-    }
-}
-
-// iOS 17
-- (void)setRingerMuted:(BOOL)arg1 withFeedback:(BOOL)arg2 reason:(id)arg3 clientType:(unsigned)arg4 {
-    %orig;
-    for (SMWeakContainer *container in _weakContainers) {
-        UIStatusBar_Base *statusBar = (UIStatusBar_Base *)container.object;
-        [statusBar reloadSingleMute];
-    }
-}
+	-(void)_updateRingerState:(int)arg1 withVisuals:(BOOL)arg2 updatePreferenceRegister:(BOOL)arg3
+	{
+		%orig;
+        isRingerMuted = !arg1;
+		[[NSNotificationCenter defaultCenter] postNotificationName:@"updateQuiteModeItem" object:nil];
+	}
 
 %end
 
 %hook UIStatusBar_Base
 
-- (instancetype)_initWithFrame:(CGRect)frame showForegroundView:(BOOL)showForegroundView wantsServer:(BOOL)wantsServer inProcessStateProvider:(id)inProcessStateProvider {
-    SMWeakContainer *container = [SMWeakContainer new];
-    container.object = self;
-    [_weakContainers addObject:container];
-    return %orig;
-}
+    - (instancetype)_initWithFrame:(CGRect)frame showForegroundView:(BOOL)showForegroundView wantsServer:(BOOL)wantsServer inProcessStateProvider:(id)inProcessStateProvider {
+        id orig = %orig;
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(updateQuiteModeItem) name:@"updateQuiteModeItem" object:nil];
+        return orig;
+    }
 
-%new
-- (void)reloadSingleMute {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        const unsigned char *data = [UIStatusBarServer getStatusBarData];
-        [self statusBarServer:self.statusBarServer didReceiveStatusBarData:data withActions:0];
-    });
-}
+    %new
+    - (void)updateQuiteModeItem {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            const unsigned char *data = [UIStatusBarServer getStatusBarData];
+            [self statusBarServer:self.statusBarServer didReceiveStatusBarData:data withActions:0];
+        });
+    }
 
 %end
-
-%end // SingleMuteQuietMode
-
-%group SingleMuteLocation
-
-%hook _UIStatusBarDataLocationEntry
-
-- (id)initFromData:(unsigned char *)arg1 type:(int)arg2 {
-    BOOL isRingerMuted = [_ringerControl isRingerMuted];
-    if (isRingerMuted) {
-        _sharedData[21] = 0;
-        return %orig(_sharedData, arg2);
-    }
-    return %orig;
-}
-
-%end
-
-%end // SingleMuteLocation
-
-%ctor {
-    ReloadPrefs();
-    if (!kIsEnabled) {
-        return;
-    }
-
-    _weakContainers = [NSMutableSet set];
-
-    %init(SingleMuteQuietMode);
-    if (kUseLowPriorityLocation) {
-        %init(SingleMuteLocation);
-    }
-}

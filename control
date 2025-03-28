@@ -1,6 +1,6 @@
 Package: com.82flex.singlemute
 Name: Single Mute
-Version: 1.0
+Version: 2.0
 Architecture: iphoneos-arm
 Description: Just a single mute icon on the status bar of iOS.
 Maintainer: 82Flex <82flex@gmail.com>

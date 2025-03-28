@@ -1,28 +1,19 @@
-export PACKAGE_VERSION := 1.5
+export THEOS_PACKAGE_SCHEME=rootless
+export TARGET = iphone:clang:13.7:13.0
 
-ifeq ($(THEOS_DEVICE_SIMULATOR),1)
-TARGET := simulator:clang:latest:14.0
-INSTALL_TARGET_PROCESSES := SpringBoard
-ARCHS := arm64 x86_64
-else
-TARGET := iphone:clang:latest:14.0
-INSTALL_TARGET_PROCESSES := SpringBoard
-ARCHS := arm64 arm64e
-endif
+THEOS_DEVICE_IP = 192.168.86.33
+
+PACKAGE_VERSION=$(THEOS_PACKAGE_BASE_VERSION)
 
 include $(THEOS)/makefiles/common.mk
 
-SUBPROJECTS += SingleMutePrefs
+export ARCHS=arm64 arm64e
 
-include $(THEOS_MAKE_PATH)/aggregate.mk
-
-TWEAK_NAME := SingleMute
-
-SingleMute_FILES += SingleMute.x
-SingleMute_CFLAGS += -fobjc-arc
+TWEAK_NAME = SingleMute
+SingleMute_FILES = SingleMute.x
+SingleMute_CFLAGS = -fobjc-arc
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-export THEOS_OBJ_DIR
-after-all::
-	@devkit/sim-install.sh
+after-install::
+	install.exec "sbreload"
